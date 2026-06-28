@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Wordle Solver</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f9f8f5; color: #1a1a18;
+      min-height: 100vh; display: flex; justify-content: center; padding: 2rem 1rem;
+    }
+    .app { width: 100%; max-width: 520px; }
+
+    header { margin-bottom: 1.75rem; border-bottom: 1px solid #e0dfd8; padding-bottom: 1rem; }
+    h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+    .subtitle { font-size: 14px; color: #666; }
+
+    /* Confirmed positions bar */
+    #known-bar { display: flex; gap: 6px; margin-bottom: 1.25rem; align-items: center; }
+    .known-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: #999; white-space: nowrap; }
+    .known-slot { width: 36px; height: 36px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; text-transform: uppercase; border: 2px dashed #d0cfc8; color: #ccc; }
+    .known-slot.set { background: #538d4e; border: 2px solid #538d4e; color: #fff; }
+
+    /* Past guesses */
+    #history { display: flex; flex-direction: column; gap: 8px; margin-bottom: 1.25rem; }
+    .hist-row { display: flex; gap: 6px; align-items: center; }
+    .hist-tile { width: 44px; height: 44px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; text-transform: uppercase; color: #fff; }
+    .hist-tile.gray   { background: #787c7e; }
+    .hist-tile.yellow { background: #c9a227; }
+    .hist-tile.green  { background: #538d4e; }
+    .btn-edit { margin-left: 6px; padding: 4px 10px; font-size: 12px; border-radius: 6px; border: 1px solid #d0cfc8; background: #fff; color: #888; cursor: pointer; }
+    .btn-edit:hover { background: #fff3cd; border-color: #c9a227; color: #7a5c00; }
+
+    /* Warning */
+    #warning { background: #fff8e1; border: 1px solid #f0c040; border-radius: 8px; padding: 10px 14px; margin-bottom: 1rem; font-size: 13px; color: #7a5c00; line-height: 1.5; display: none; }
+    #warning.on { display: block; }
+    #warning strong { font-weight: 600; }
+    .warn-btns { display: flex; gap: 8px; margin-top: 8px; }
+    .btn-warn-ok  { padding: 5px 12px; font-size: 12px; border-radius: 6px; cursor: pointer; border: 1px solid #c9a227; background: #c9a227; color: #fff; }
+    .btn-warn-ok:hover { background: #b8911f; }
+    .btn-warn-no  { padding: 5px 12px; font-size: 12px; border-radius: 6px; cursor: pointer; border: 1px solid #d0cfc8; background: #fff; color: #555; }
+    .btn-warn-no:hover { background: #f0efe8; }
+
+    /* Current guess tiles */
+    .section-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: #999; margin-bottom: 10px; }
+    #tiles-area { display: flex; gap: 8px; margin-bottom: 1.25rem; }
+    .tile-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+
+    .tile {
+      width: 54px; height: 54px; border: 2px solid #d0cfc8; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px; font-weight: 700; text-transform: uppercase;
+      cursor: pointer; background: #fff; color: #1a1a18; user-select: none;
+      outline: none; transition: border-color 0.1s, background 0.1s;
+    }
+    .tile.empty  { color: #ccc; border-style: dashed; }
+    .tile.active { border-color: #1a1a18; border-width: 2.5px; }
+    .tile.gray   { background: #787c7e; border-color: #787c7e; color: #fff; }
+    .tile.yellow { background: #c9a227; border-color: #c9a227; color: #fff; }
+    .tile.green  { background: #538d4e; border-color: #538d4e; color: #fff; }
+    .tile.conflict { outline: 3px solid #e53935; outline-offset: 2px; }
+
+    /* Colour dots */
+    .dots { display: flex; gap: 5px; }
+    .dot { width: 14px; height: 14px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; transition: transform 0.1s; flex-shrink: 0; }
+    .dot:hover { transform: scale(1.25); }
+    .dot.gray-dot   { background: #787c7e; }
+    .dot.yellow-dot { background: #c9a227; }
+    .dot.green-dot  { background: #538d4e; }
+    .dot.on { border-color: #1a1a18; }
+    .tile-col.empty .dots { visibility: hidden; }
+
+    /* Buttons */
+    .action-row { display: flex; gap: 8px; margin-bottom: 1.5rem; align-items: center; flex-wrap: wrap; }
+    button { padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; border: 1px solid transparent; transition: background 0.12s, transform 0.08s, box-shadow 0.25s; }
+    button:active { transform: scale(0.97); }
+    .btn-green  { background: #538d4e; color: #fff; border-color: #538d4e; }
+    .btn-green:hover { background: #437a3f; }
+    .btn-plain  { background: #fff; color: #555; border-color: #d0cfc8; }
+    .btn-plain:hover { background: #f0efe8; }
+
+    #submit-btn.off { background: #d8d7d0; border-color: #d8d7d0; color: #aaa; cursor: not-allowed; }
+    #submit-btn.off:hover { background: #d8d7d0; transform: none; }
+    #submit-btn.off:active { transform: none; }
+    #submit-btn.shake { animation: shake 0.38s ease; }
+    #submit-btn.ready { animation: pulse 1.4s ease-out 1; }
+
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      25%     { transform: translateX(-5px); }
+      75%     { transform: translateX(5px); }
+    }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(83,141,78,0.6); }
+      70%  { box-shadow: 0 0 0 12px rgba(83,141,78,0.05); }
+      100% { box-shadow: 0 0 0 16px rgba(83,141,78,0); }
+    }
+    #btn-hint { font-size: 12px; color: #e57373; display: none; }
+    #btn-hint.on { display: inline; }
+
+    /* Suggestion */
+    #suggest-area { margin-bottom: 1.25rem; }
+    .suggest-box { background: #fff; border: 1px solid #b8ddb5; border-radius: 10px; padding: 14px 18px; display: flex; align-items: center; gap: 12px; }
+    .suggest-label { font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
+    .suggest-word { font-size: 26px; font-weight: 700; letter-spacing: 4px; color: #538d4e; font-family: monospace; }
+    .suggest-sub { font-size: 12px; color: #999; margin-top: 2px; }
+    .suggest-right { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+    .pill { font-size: 13px; color: #538d4e; background: #eaf3de; border-radius: 20px; padding: 4px 12px; font-weight: 500; white-space: nowrap; }
+    .btn-use { padding: 6px 14px; font-size: 13px; font-weight: 500; border-radius: 6px; border: 1px solid #538d4e; background: #538d4e; color: #fff; cursor: pointer; }
+    .btn-use:hover { background: #437a3f; }
+    .solved-box { background: #eaf3de; border: 1px solid #b8ddb5; border-radius: 10px; padding: 14px 18px; font-size: 16px; font-weight: 600; color: #27500a; text-align: center; }
+
+    /* Candidates */
+    .cands-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .cands-count { font-size: 12px; color: #538d4e; background: #eaf3de; border-radius: 20px; padding: 3px 10px; font-weight: 500; }
+    #candidates { display: flex; flex-wrap: wrap; gap: 6px; max-height: 200px; overflow-y: auto; padding: 4px 0; }
+    .cand { padding: 5px 10px; border: 1px solid #e0dfd8; border-radius: 6px; font-size: 13px; font-family: monospace; font-weight: 600; text-transform: uppercase; color: #333; background: #fff; cursor: pointer; letter-spacing: 1px; transition: border-color 0.1s, background 0.1s; }
+    .cand:hover { border-color: #538d4e; color: #538d4e; background: #f4fbf2; }
+    .cand.best { border-color: #538d4e; background: #eaf3de; color: #27500a; }
+    .overflow-note { font-size: 12px; color: #999; width: 100%; }
+    #candidates::-webkit-scrollbar { width: 4px; }
+    #candidates::-webkit-scrollbar-thumb { background: #d0cfc8; border-radius: 4px; }
+
+    @media (max-width: 420px) {
+      .tile { width: 46px; height: 46px; font-size: 20px; }
+      .suggest-word { font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Wordle Solver</h1>
+    <p class="subtitle">Click a tile to select it, then type. Use the dots below to set each colour.</p>
+  </header>
+
+  <div id="known-bar" style="display:none">
+    <span class="known-label">confirmed</span>
+    <div class="known-slot" id="ks0">?</div>
+    <div class="known-slot" id="ks1">?</div>
+    <div class="known-slot" id="ks2">?</div>
+    <div class="known-slot" id="ks3">?</div>
+    <div class="known-slot" id="ks4">?</div>
+  </div>
+
+  <div id="history"></div>
+
+  <div id="warning">
+    <div id="warning-text"></div>
+    <div class="warn-btns">
+      <button class="btn-warn-ok" id="warn-ok">Submit anyway</button>
+      <button class="btn-warn-no" id="warn-no">Go back and fix</button>
+    </div>
+  </div>
+
+  <div class="section-label">current guess — click a tile to start typing</div>
+  <div id="tiles-area">
+    <!-- built by JS below -->
+  </div>
+
+  <div class="action-row">
+    <button class="btn-green off" id="submit-btn">Enter guess</button>
+    <button class="btn-plain" id="reset-btn">Reset</button>
+    <span id="btn-hint">Fill in all letters and colours first</span>
+  </div>
+
+  <div id="suggest-area"></div>
+
+  <div>
+    <div class="cands-header">
+      <span class="section-label" style="margin:0">possible words</span>
+      <span class="cands-count" id="cand-count"></span>
+    </div>
+    <div id="candidates"></div>
+  </div>
+</div>
+
+<script>
+// ── Word list ────────────────────────────────────────────────────────────────
+const WORDS = [...new Set(`aback abase abate abbey abbot abhor abide abled abode abort about above abuse abyss acorn acrid actor acute adage adapt adept admin admit adobe adopt adore adorn adult affix afire afoot afoul after again agape agate agent agile aging aglow agony agora agree ahead aider aisle alarm album alert algae alibi alien align alike alive allay alley allot allow alloy aloft alone along aloof aloud alpha altar alter amass amaze amber amble amend amiss amity among ample amply amuse angel anger angle angry angst anime ankle annex annoy annul anode antic anvil aorta apart aphid aping apnea apple apply apron aptly arbor ardor arena argue arise armor aroma arose array arrow arson artsy ascot ashen aside askew assay asset atoll atone attic audio audit augur aunty avail avert avian avoid await awake award aware awash awful awoke axial axiom axion azure bacon badge badly bagel baggy baker baler balmy banal banjo barge baron basal basic basil basin basis baste batch bathe baton batty bawdy bayou beach beady beard beast beech beefy befit began begat beget begin begun being belch belie belle belly below bench beret berry berth beset betel bevel bezel bible bicep biddy bigot bilge billy binge bingo biome birch birth bison bitty black blade blame bland blank blare blast blaze bleak bleat bleed bleep blend bless blimp blind blink bliss blitz bloat block bloke blond blood bloom blown bluer bluff blunt blurb blurt blush board boast bobby boney bongo bonus booby boost booth booty booze boozy borax borne bosom bossy botch bough boule bound bowel boxer brace braid brain brake brand brash brass brave bravo brawl brawn bread break breed briar bribe brick bride brief brine bring brink briny brisk broad broil broke brood brook broom broth brown brunt brush brute buddy budge buggy bugle build built bulge bulky bully bunch bunny burly burnt burst bused bushy butch butte buxom buyer bylaw cabal cabby cabin cable cacao cache cacti caddy cadet cagey cairn camel cameo canal candy canny canoe canon caper caput carat cargo carol carry carve caste catch cater catty caulk cause cavil cease cedar cello chafe chaff chain chair chalk champ chant chaos chard charm chart chase chasm cheap cheat check cheek cheer chess chest chick chide chief child chili chill chime china chirp chock choir choke chord chore chose chuck chump chunk churn chute cider cigar cinch circa civic civil clack claim clamp clang clank clash clasp class clean clear cleat cleft clerk click cliff climb cling clink cloak clock clone close cloth cloud clout clove clown cluck clued clump clung coach coast cobra cocoa colon color comet comfy comic comma conch condo conic copse coral corer corny couch cough could count coupe court coven cover covet covey cower coyly crack craft cramp crane crank crash crass crate crave crawl craze crazy creak cream credo creed creek creep creme crepe crept cress crest crick cried crier crime crimp crisp croak crock crone crony crook cross croup crowd crown crude cruel crumb crump crush crust crypt cubic cumin curio curly curry curse curve curvy cutie cyber cycle cynic daddy daily dairy daisy dally dance dandy datum daunt dealt death debar debit debug debut decal decay decor decoy decry defer deign deity delay delta delve demon demur denim dense depot depth derby deter detox deuce devil diary dicey digit dilly dimly diner dingo dingy diode dirge dirty disco ditch ditto ditty diver dizzy dodge dodgy dogma doing dolly donor donut dopey doubt dough dowdy dowel downy dowry dozen draft drain drake drama drank drape drawl drawn dread dream dress dried drier drift drill drink drive droit droll drone drool droop dross drove drown druid drunk dryer dryly duchy dully dummy dumpy dunce dusky dusty dutch duvet dwarf dwell dwelt dying eager eagle early earth easel eaten eater ebony eclat edict edify eerie egret eight eject eking elate elbow elder elect elegy elfin elide elite elope elude email embed ember emcee empty enact endow enema enemy enjoy ennui ensue enter entry envoy epoch epoxy equal equip erase erect erode error erupt essay ester ether ethic ethos etude evade event every evict evoke exact exalt excel exert exile exist expel extol extra exult eying fable facet faint fairy faith false fancy fanny farce fatal fatty fault fauna favor feast fecal feign fella felon femme femur fence feral ferry fetal fetch fetid fetus fever fewer fiber fibre ficus field fiend fiery fifth fifty fight filer filet filly filmy filth final finch finer first fishy fixer fizzy fjord flack flail flair flake flaky flame flank flare flash flask fleck fleet flesh flick flier fling flint flirt float flock flood floor flora floss flour flout flown fluff fluid fluke flume flung flunk flush flute flyer foamy focal focus foggy foist folio folly foray force forge forgo forte forth forty forum found foyer frail frame frank fraud freak freed freer fresh friar fried frill frisk fritz frock frond front frost froth frown froze fruit fudge fugue fully fungi funky funny furor furry fussy fuzzy gaffe gaily gamer gamma gamut gassy gaudy gauge gaunt gauze gavel gawky gayer gayly gazer gecko geeky geese genie genre ghost ghoul giant giddy gipsy girly girth given giver glade gland glare glass glaze gleam glean glide glint gloat globe gloom glory gloss glove glyph gnash gnome godly going golem golly gonad goner goody gooey goofy goose gorge gouge gourd grace grade graft grail grain grand grant grape graph grasp grass grate grave gravy graze great greed green greet grief grill grime grimy grind gripe groan groin groom grope gross group grout grove growl grown gruel gruff grunt guard guava guess guest guide guild guile guilt guise gulch gully gumbo gummy guppy gusto gusty gypsy habit hairy halve handy happy hardy harem harpy harry harsh haste hasty hatch hater haunt haute haven havoc hazel heady heard heart heath heave heavy hedge hefty heist helix hello hence heron hilly hinge hippo hippy hitch hoard hobby hoist holly homer honey honor horde horny horse hotel hotly hound house hovel hover howdy human humid humor humph humus hunch hunky hurry husky hussy hutch hydro hyena hymen hyper icily icing ideal idiom idiot idler idyll igloo iliac image imbue impel imply inane inbox incur index inept inert infer ingot inlay inlet inner input inter intro ionic irate irony islet issue itchy ivory jaunt jazzy jelly jerky jetty jewel jiffy joint joist joker jolly joust judge juice juicy jumbo jumpy junta junto juror kappa karma kayak kebab khaki kinky kiosk kitty knack knave knead kneed kneel knelt knife knock knoll known koala krill label labor laden ladle lager lance lanky lapel lapse large larva lasso latch later lathe latte laugh layer leach leafy leaky leant leapt learn lease leash least leave ledge leech leery lefty legal leggy lemon lemur leper level lever libel liege light liken lilac limbo limit linen liner lingo lipid lithe liver livid llama loamy loath lobby local locus lodge lofty logic login loopy loose lorry loser louse lousy lover lower lowly loyal lucid lucky lumen lumpy lunar lunch lunge lupus lurch lurid lusty lying lymph lynch lyric macaw macho macro madam madly mafia magic magma maize major maker mambo mamma mammy manga mange mango mangy mania manic manly manor maple march marry marsh mason masse match matey mauve maxim maybe mayor mealy meant meaty mecca medal media medic melee melon mercy merge merit merry metal meter metro micro midge midst might milky mimic mince miner minim minor minty minus mirth miser missy mocha modal model modem mogul moist molar moldy money month moody moose moral moron morph mossy motel motif motor motto moult mound mount mourn mouse mouth mover movie mower mucky mucus muddy mulch mummy munch mural murky mushy music musky musty myrrh nadir naive nanny nasal nasty natal naval navel needy neigh nerdy nerve never newer newly nicer niche niece night ninja ninny ninth noble nobly noise noisy nomad noose north nosey notch novel nudge nurse nutty nylon nymph oaken obese occur ocean octal octet odder oddly offal offer often olden older olive ombre omega onion onset opera opine opium optic orbit order organ other otter ought ounce outdo outer outgo ovary ovate overt ovine ovoid owing owner oxide ozone paddy pagan paint paler palsy panel panic pansy papal paper parer parka parry parse party pasta paste pasty patch patio patsy patty pause payee payer peace peach pearl pecan pedal penal pence penne penny perch peril perky pesky pesto petal petty phase phone phony photo piano picky piece piety piggy pilot pinch piney pinky pinto piper pique pitch pithy pivot pixel pixie pizza place plaid plain plait plane plank plant plate plaza plead pleat plied plier pluck plumb plume plump plunk plush poesy point poise poker polar polka polyp pooch poppy porch poser posit posse pouch pound pouty power prank prawn preen press price prick pride pried prime primo print prior prism privy prize probe prone prong proof prose proud prove prowl proxy prude prune psalm pubic pudgy puffy pulpy pulse punch pupal pupil puppy puree purer purge purse pushy putty pygmy quack quail quake qualm quark quart quash quasi queen queer quell query quest queue quick quiet quill quilt quirk quite quota quote quoth rabbi rabid racer radar radii radio rainy raise rajah rally ralph ramen ranch randy range rapid rarer raspy ratio ratty raven rayon razor reach react ready realm rearm rebar rebel rebus rebut recap recur recut reedy refer refit regal rehab reign relax relay relic remit renal renew repay repel reply rerun reset resin retch retro retry reuse revel revue rhino rhyme rider ridge rifle right rigid rigor rinse ripen riper risen riser risky rival river rivet roach roast robin robot rocky rodeo roger rogue roomy roost rotor rouge rough round rouse route rover rowdy rower royal ruddy ruder rugby ruler rumba rumor rupee rural rusty sadly safer saint salad sally salon salsa salty salve salvo sandy saner sappy sassy satin satyr sauce saucy sauna saute savor savoy savvy scald scale scalp scaly scamp scant scare scarf scary scene scent scion scoff scold scone scoop scope score scorn scour scout scowl scram scrap scree screw scrub scrum scuba sedan seedy segue seize semen sense sepia serif serum serve setup seven sever sewer shack shade shady shaft shake shaky shale shall shalt shame shank shape shard share shark sharp shave shawl shear sheen sheep sheer sheet sheik shelf shell shied shift shine shiny shire shirk shirt shoal shock shone shook shoot shore shorn short shout shove shown showy shrew shrub shrug shuck shunt shush shyly siege sieve sight sigma silky silly since sinew singe siren sissy sixth sixty skate skier skiff skill skimp skirt skulk skull skunk slack slain slang slant slash slate slave sleek sleep sleet slept slice slick slide slime slimy sling slink sloop slope slosh sloth slump slung slunk slurp slush slyly smack small smart smash smear smell smelt smile smirk smite smith smock smoke smoky smote snack snail snake snaky snare snarl sneak sneer snide sniff snipe snoop snore snort snout snowy snuck snuff soapy sober soggy solar solid solve sonar sonic sooth sooty sorry sound south sower space spade spank spare spark spasm spawn speak spear speck speed spell spelt spend spent sperm spice spicy spied spiel spike spiky spill spilt spine spiny spire spite splat split spoil spoke spoof spook spool spoon spore sport spout spray spree sprig spunk spurn spurt squad squat squib stack staff stage staid stain stair stake stale stalk stall stamp stand stank stare stark start stash state stave stead steak steal steam steed steel steep steer stein stern stick stiff still stilt sting stink stint stock stoic stoke stole stomp stone stony stood stool stoop store stork storm story stout stove strap straw stray strip strut stuck study stuff stump stung stunk stunt style suave sugar suing suite sulky sully sumac sunny super surer surge surly sushi swami swamp swarm swash swath swear sweat sweep sweet swell swept swift swill swine swing swirl swish swoon swoop sword swore sworn swung synod syrup tabby table taboo tacit tacky taffy taint taken taker tally talon tamer tango tangy taper tapir tardy tarot taste tasty tatty taunt tawny teach teary tease teddy teeth tempo tenet tenor tense tenth tepee tepid terra terse testy thank theft their theme there these theta thick thief thigh thing think third thong thorn those three threw throb throw thrum thumb thump thyme tiara tibia tidal tiger tight tilde timer timid tipsy titan tithe title toast today toddy token tonal tonga tonic tooth topaz topic torch torso torus total totem touch tough towel tower toxic toxin trace track tract trade trail train trait tramp trash trawl tread treat trend triad trial tribe trice trick tried tripe trite troll troop trope trout trove truce truck truer truly trump trunk truss trust truth tryst tubal tuber tulip tulle tumor tunic turbo tutor twang tweak tweed tweet twice twine twirl twist twixt tying udder ulcer ultra umbra uncle uncut under undid undue unfed unfit unify union unite unity unlit unmet unset untie until unwed unzip upper upset urban urine usage usher using usual usurp utile utter vague valet valid valor value valve vapid vapor vault vaunt vegan venom venue verge verse verso verve vicar video vigil vigor villa vinyl viola viper viral virus visit visor vista vital vivid vixen vocal vodka vogue voice voila vomit voter vouch vowel vying wacky wafer wager wagon waist waive waltz warty waste watch water waver waxen weary weave wedge weedy weigh weird welch welsh wench whack whale wharf wheat wheel whelp where which whiff while whine whiny whirl whisk white whole whoop whose widen wider widow width wield wight willy wimpy wince winch windy wiser wispy witch witty woken woman women woody wooer wooly woozy wordy world worry worse worst worth would wound woven wrack wrath wreak wreck wrest wring wrist write wrong wrote wrung wryly yacht yearn yeast yield young youth zebra zesty zonal`.trim().split(/\s+/))];
+
+// ── State ────────────────────────────────────────────────────────────────────
+let letters    = Array(5).fill('');   // current guess letters
+let colors     = Array(5).fill('');   // current guess colours
+let active     = null;                // focused tile index (0-4) or null
+let guesses    = [];                  // [{word, colors}]
+let candidates = [...WORDS];
+
+// ── Algorithm ────────────────────────────────────────────────────────────────
+function bestGuess(pool) {
+  if (!pool.length) return null;
+  if (pool.length <= 2) return pool[0];
+  // Score each word by sum of per-letter frequency (unique letters only)
+  const freq = {};
+  for (const w of pool) for (const c of w) freq[c] = (freq[c] || 0) + 1;
+  let best = pool[0], bestScore = -1;
+  for (const w of pool) {
+    const score = [...new Set(w)].reduce((s, c) => s + freq[c], 0);
+    if (score > bestScore) { bestScore = score; best = w; }
+  }
+  return best;
+}
+
+function applyGuess(pool, word, cols) {
+  return pool.filter(candidate => {
+    // Greens: exact match required
+    for (let i = 0; i < 5; i++)
+      if (cols[i] === 'green' && candidate[i] !== word[i]) return false;
+
+    // Per-letter count constraints
+    for (const c of new Set(word)) {
+      const confirmed = word.split('').filter((ch, j) => ch === c && (cols[j] === 'green' || cols[j] === 'yellow')).length;
+      const capped    = word.split('').some((ch, j) => ch === c && cols[j] === 'gray');
+      const count     = candidate.split('').filter(ch => ch === c).length;
+      if (count < confirmed) return false;
+      if (capped && count > confirmed) return false;
+      // Yellows: letter exists but not in this position
+      for (let i = 0; i < 5; i++)
+        if (word[i] === c && cols[i] === 'yellow' && candidate[i] === c) return false;
+    }
+    return true;
+  });
+}
+
+function rebuildPool() {
+  return guesses.reduce((pool, g) => applyGuess(pool, g.word, g.colors), [...WORDS]);
+}
+
+// Positions confirmed green across all submitted guesses
+function confirmedPositions() {
+  const out = Array(5).fill(null);
+  for (const g of guesses)
+    for (let i = 0; i < 5; i++)
+      if (g.colors[i] === 'green') out[i] = g.word[i];
+  return out;
+}
+
+// Conflicts between current input and confirmed positions
+function conflicts() {
+  return confirmedPositions().flatMap((c, i) => {
+    if (!c || !letters[i]) return [];
+    if (letters[i] !== c)
+      return [`Position ${i+1} was confirmed <strong>${c.toUpperCase()}</strong> but you entered <strong>${letters[i].toUpperCase()}</strong>.`];
+    if (colors[i] && colors[i] !== 'green')
+      return [`Position ${i+1} is confirmed green but you marked it <strong>${colors[i]}</strong>.`];
+    return [];
+  });
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+function render() {
+  renderKnownBar();
+  renderTiles();
+  renderSubmitBtn();
+  renderSuggest();
+  renderCandidates();
+}
+
+function renderKnownBar() {
+  const pos = confirmedPositions();
+  const any = pos.some(Boolean);
+  document.getElementById('known-bar').style.display = any ? 'flex' : 'none';
+  pos.forEach((c, i) => {
+    const el = document.getElementById('ks' + i);
+    el.textContent = c ? c.toUpperCase() : '?';
+    el.className = 'known-slot' + (c ? ' set' : '');
+  });
+}
+
+function renderHistory() {
+  document.getElementById('history').innerHTML = guesses.map((g, idx) => `
+    <div class="hist-row">
+      ${g.word.split('').map((c, i) => `<div class="hist-tile ${g.colors[i]}">${c.toUpperCase()}</div>`).join('')}
+      <button class="btn-edit" onclick="editGuess(${idx})">Edit</button>
+    </div>`).join('');
+}
+
+function renderTiles() {
+  const bad = new Set(conflicts().map((_, i) => i)); // conflicts() returns strings now, use index tracking
+  // Re-derive conflict indices properly
+  const badIdx = new Set(
+    confirmedPositions().flatMap((c, i) =>
+      c && letters[i] && (letters[i] !== c || (colors[i] && colors[i] !== 'green')) ? [i] : []
+    )
+  );
+
+  for (let i = 0; i < 5; i++) {
+    const col  = document.getElementById('col' + i);
+    const tile = document.getElementById('tile' + i);
+    const dots = document.getElementById('dots' + i);
+
+    const empty = !letters[i];
+    col.className  = 'tile-col' + (empty ? ' empty' : '');
+    tile.textContent = empty ? '' : letters[i].toUpperCase();
+
+    let cls = 'tile';
+    if (empty)       cls += ' empty';
+    if (colors[i])   cls += ' ' + colors[i];
+    if (active === i) cls += ' active';
+    if (badIdx.has(i)) cls += ' conflict';
+    tile.className = cls;
+
+    // Dot selected state
+    for (const dot of dots.children) {
+      const dcol = dot.dataset.color;
+      dot.className = `dot ${dcol}-dot` + (colors[i] === dcol ? ' on' : '');
+    }
+  }
+}
+
+function renderSubmitBtn() {
+  const complete = letters.every(Boolean) && colors.every(Boolean);
+  const btn = document.getElementById('submit-btn');
+  const wasOff = btn.classList.contains('off');
+
+  btn.classList.toggle('off', !complete);
+
+  if (complete && wasOff) {
+    // Just became complete — play pulse
+    btn.classList.remove('ready');
+    void btn.offsetWidth; // reflow to restart animation
+    btn.classList.add('ready');
+  }
+  if (!complete) btn.classList.remove('ready');
+}
+
+function renderSuggest() {
+  const el = document.getElementById('suggest-area');
+  const solved = guesses.length && guesses.at(-1).colors.every(c => c === 'green');
+  if (solved) {
+    el.innerHTML = `<div class="solved-box">Solved in ${guesses.length} ${guesses.length === 1 ? 'guess' : 'guesses'}!</div>`;
+    return;
+  }
+  const best = bestGuess(candidates);
+  el.innerHTML = best ? `
+    <div class="suggest-box">
+      <div>
+        <div class="suggest-label">best next guess</div>
+        <div class="suggest-word">${best.toUpperCase()}</div>
+        <div class="suggest-sub">highest information gain</div>
+      </div>
+      <div class="suggest-right">
+        <span class="pill">${candidates.length} word${candidates.length !== 1 ? 's' : ''} left</span>
+        <button class="btn-use" onclick="useWord('${best}')">Use this word</button>
+      </div>
+    </div>` : '';
+}
+
+function renderCandidates() {
+  const best = bestGuess(candidates);
+  const cnt  = document.getElementById('cand-count');
+  const el   = document.getElementById('candidates');
+  cnt.textContent = candidates.length + (candidates.length === 1 ? ' word' : ' words');
+  if (!candidates.length) { el.innerHTML = '<span class="no-cands">No candidates — check your colours.</span>'; return; }
+  el.innerHTML = candidates.slice(0, 100).map(w =>
+    `<span class="cand${w === best ? ' best' : ''}" onclick="useWord('${w}')">${w.toUpperCase()}</span>`
+  ).join('') + (candidates.length > 100 ? `<span class="overflow-note">…and ${candidates.length - 100} more</span>` : '');
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+function useWord(w) {
+  letters = w.split('');
+  colors  = Array(5).fill('');
+  active  = 0;
+  hideWarning();
+  render();
+  document.getElementById('tile0').focus();
+}
+
+function commitGuess() {
+  const word = letters.join('');
+  guesses.push({ word, colors: [...colors] });
+  candidates = applyGuess(candidates, word, colors);
+  letters  = Array(5).fill('');
+  colors   = Array(5).fill('');
+  active   = null;
+  hideWarning();
+  renderHistory();
+  render();
+  const best = bestGuess(candidates);
+  if (best && candidates.length > 1) useWord(best);
+}
+
+window.editGuess = function(idx) {
+  const g = guesses[idx];
+  guesses    = guesses.slice(0, idx);
+  candidates = rebuildPool();
+  letters = g.word.split('');
+  colors  = [...g.colors];
+  active  = null;
+  hideWarning();
+  renderHistory();
+  render();
+};
+
+function hideWarning() {
+  document.getElementById('warning').classList.remove('on');
+}
+
+function showWarning(msgs) {
+  document.getElementById('warning-text').innerHTML =
+    `<strong>Conflict with a previous guess:</strong><br>${msgs.map(m => '⚠ ' + m).join('<br>')}<br>This may lead to no words matching.`;
+  document.getElementById('warning').classList.add('on');
+}
+
+// ── Input handling (single document listener) ─────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'BUTTON') return;
+
+  if (e.key === 'Enter') { document.getElementById('submit-btn').click(); return; }
+
+  if (e.key === 'Backspace') {
+    e.preventDefault();
+    if (active === null) return;
+    if (letters[active]) {
+      letters[active] = '';
+      colors[active]  = '';
+    } else if (active > 0) {
+      active--;
+      letters[active] = '';
+      colors[active]  = '';
+    }
+    hideWarning(); renderTiles(); renderSubmitBtn();
+    document.getElementById('tile' + active).focus();
+    return;
+  }
+
+  if (e.key === 'ArrowLeft'  && active > 0) { active--; renderTiles(); document.getElementById('tile' + active).focus(); return; }
+  if (e.key === 'ArrowRight' && active < 4) { active++; renderTiles(); document.getElementById('tile' + active).focus(); return; }
+
+  if (/^[a-zA-Z]$/.test(e.key)) {
+    e.preventDefault();
+    // If no tile active, pick first empty
+    if (active === null) active = letters.findIndex(l => !l);
+    if (active === -1 || active === null) return;
+    letters[active] = e.key.toLowerCase();
+    colors[active]  = '';
+    hideWarning(); renderTiles(); renderSubmitBtn();
+    if (active < 4) { active++; renderTiles(); }
+    document.getElementById('tile' + active).focus();
+  }
+});
+
+// ── Button wiring ─────────────────────────────────────────────────────────────
+document.getElementById('submit-btn').onclick = () => {
+  const complete = letters.every(Boolean) && colors.every(Boolean);
+  if (!complete) {
+    const btn = document.getElementById('submit-btn');
+    btn.classList.remove('shake');
+    void btn.offsetWidth;
+    btn.classList.add('shake');
+    const hint = document.getElementById('btn-hint');
+    hint.classList.add('on');
+    setTimeout(() => hint.classList.remove('on'), 2500);
+    return;
+  }
+  const c = conflicts();
+  if (c.length) { showWarning(c); return; }
+  commitGuess();
+};
+
+document.getElementById('reset-btn').onclick = () => {
+  guesses    = [];
+  candidates = [...WORDS];
+  letters    = Array(5).fill('');
+  colors     = Array(5).fill('');
+  active     = null;
+  hideWarning();
+  document.getElementById('suggest-area').innerHTML = '';
+  renderHistory();
+  render();
+};
+
+document.getElementById('warn-ok').onclick = commitGuess;
+document.getElementById('warn-no').onclick = hideWarning;
+
+// ── Build tile DOM (static HTML would require 5x repetition, JS is cleaner here)
+(function buildTiles() {
+  const area = document.getElementById('tiles-area');
+  for (let i = 0; i < 5; i++) {
+    const col  = document.createElement('div');
+    col.className = 'tile-col empty';
+    col.id = 'col' + i;
+
+    const tile = document.createElement('div');
+    tile.className = 'tile empty';
+    tile.id = 'tile' + i;
+    tile.tabIndex = 0;
+    tile.onclick = () => { active = i; renderTiles(); tile.focus(); };
+
+    const dots = document.createElement('div');
+    dots.className = 'dots';
+    dots.id = 'dots' + i;
+    for (const col_name of ['gray', 'yellow', 'green']) {
+      const dot = document.createElement('div');
+      dot.className = `dot ${col_name}-dot`;
+      dot.dataset.color = col_name;
+      dot.onclick = e => { e.stopPropagation(); if (letters[i]) { colors[i] = col_name; hideWarning(); renderTiles(); renderSubmitBtn(); } };
+      dots.appendChild(dot);
+    }
+
+    col.append(tile, dots);
+    area.appendChild(col);
+  }
+})();
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+renderHistory();
+render();
+</script>
+</body>
+</html>
